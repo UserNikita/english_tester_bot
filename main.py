@@ -27,13 +27,14 @@ def generate_keyboard(right_answer, wrong_answers):
     :param wrong_answers: list of str список неправильных вариантов ответа
     :return: объект класса telebot.types.ReplyKeyboardMarkup
     """
-    keyboard = telebot.types.ReplyKeyboardMarkup(one_time_keyboard=True, row_width=2)
+    keyboard = telebot.types.InlineKeyboardMarkup(row_width=2)
 
     answers = [right_answer]
     answers.extend(wrong_answers)
     random.shuffle(answers)
 
-    keyboard.add(*answers)
+    buttons = [telebot.types.InlineKeyboardButton(answer, callback_data=answer) for answer in answers]
+    keyboard.add(*buttons)
     return keyboard
 
 
@@ -55,10 +56,8 @@ def start(message):
 @bot.message_handler(commands=['stop'])
 def stop(message):
     """Обработчик команды /stop"""
-    user_id = message.from_user.id
-    Game(user_id=user_id).end_game()
-    keyboard_remover = telebot.types.ReplyKeyboardRemove()
-    bot.send_message(message.chat.id, "Спасибо за честную игру", reply_markup=keyboard_remover)
+    Game(user_id=message.from_user.id).end_game()
+    bot.send_message(message.chat.id, "Спасибо за честную игру")
 
 
 @bot.message_handler(commands=['game'])
@@ -76,24 +75,38 @@ def statistic(message):
 
 
 @bot.message_handler(func=lambda message: True, content_types=['text'])
-def check_answer(message):
-    """Функция для получения ответов от пользователя и их проверки"""
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-    keyboard_remover = telebot.types.ReplyKeyboardRemove()
+def message_handler(message):
+    """Функция для получения сообщений от пользователя"""
+    bot.send_message(message.chat.id, "Чтобы начать игру введи команду /game")
+
+
+@bot.callback_query_handler(func=lambda call: True)
+def check_answer(call):
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
 
     try:
-        if Game(user_id=user_id).check_answer(message.text):
+        g = Game(user_id=user_id)
+        if g.check_answer(call.data):
             Statistics(user_id=user_id).add_right_answer()
-            bot.send_message(chat_id, "Правильно {}".format(settings.RIGHT_ANSWER_EMOJI),
-                             reply_markup=keyboard_remover)
+            text = "{emoji} <b>{question}</b>\nВаш ответ: <i>{answer}</i>".format(
+                emoji=settings.RIGHT_ANSWER_EMOJI,
+                question=call.message.text,
+                answer=call.data
+            )
         else:
             Statistics(user_id=user_id).add_wrong_answer()
-            bot.send_message(chat_id, "Неправильно {}".format(settings.WRONG_ANSWER_EMOJI),
-                             reply_markup=keyboard_remover)
+            text = "{emoji} <b>{question}</b>\nВаш ответ: <i>{answer}</i>\nВерный ответ: <i>{right_answer}</i>"
+            text = text.format(
+                emoji=settings.WRONG_ANSWER_EMOJI,
+                question=call.message.text,
+                answer=call.data,
+                right_answer=g.expected_answer
+            )
+        bot.edit_message_text(text, chat_id=chat_id, message_id=call.message.message_id, parse_mode='HTML')
         send_question(user_id=user_id)
     except ExpectedAnswerNotFoundException:
-        bot.send_message(chat_id, "Чтобы начать игру введи команду /game", reply_markup=keyboard_remover)
+        bot.send_message(chat_id, "Чтобы начать игру введи команду /game")
 
 
 if __name__ == '__main__':
